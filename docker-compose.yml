@@ -1,20 +1,10 @@
-version: "3.9"
-
 services:
-  backend:
-    build: ./backend
-    container_name: carbon-backend
-    restart: always
-    expose:
-      - "8080"
-    environment:
-      - PORT=8080
-
   frontend:
-    build: ./frontend
-    container_name: carbon-frontend
-    restart: always
+    image: sunilak05/devops-intel-frontend:latest   # or use :${TAG} managed by deployment script
     ports:
       - "80:80"
-    depends_on:
-      - backend
+
+  backend:
+    image: sunilak05/devops-intel-backend:latest
+    ports:
+      - "8080:8080"
