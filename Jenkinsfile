@@ -6,13 +6,16 @@ pipeline {
         GITHUB = credentials('github')
         DOCKERHUB = credentials('dockerhub-cred')
 
-        // Docker buildkit settings
+        // BuildKit for fast builds
         DOCKER_BUILDKIT = "1"
         BUILDKIT_STEP_LOG_MAX_SIZE = "104857600"
         BUILDKIT_PROGRESS = "plain"
 
         // DockerHub username
         DOCKERHUB_USER = "sunilak05"
+
+        // Tag placeholder
+        TAG = ""
     }
 
     stages {
@@ -23,11 +26,12 @@ pipeline {
                 checkout scm
 
                 script {
-                    TAG = sh(
+                    env.TAG = sh(
                         script: "git rev-parse --short HEAD",
                         returnStdout: true
                     ).trim()
-                    echo "Using TAG: ${TAG}"
+
+                    echo "Using TAG: ${env.TAG}"
                 }
             }
         }
@@ -36,7 +40,7 @@ pipeline {
         stage('Preload Base Images') {
             steps {
                 sh """
-                    echo "Pre-pulling base images (mirror + cache)..."
+                    echo "Pre-pulling base images..."
                     docker pull registry.hub.docker.com/library/golang:1.22 || true
                     docker pull registry.hub.docker.com/library/alpine:3.20 || true
                     docker pull node:20-alpine || true
@@ -50,10 +54,10 @@ pipeline {
             steps {
                 script {
                     if (fileExists('backend/Dockerfile')) {
-                        echo "Building backend image..."
+                        echo "Building backend..."
                         sh """
                             docker build \
-                                -t ${DOCKERHUB_USER}/devops-intel-backend:${TAG} \
+                                -t ${DOCKERHUB_USER}/devops-intel-backend:${env.TAG} \
                                 backend
                         """
                     } else {
@@ -68,10 +72,10 @@ pipeline {
             steps {
                 script {
                     if (fileExists('frontend/Dockerfile')) {
-                        echo "Building frontend image..."
+                        echo "Building frontend..."
                         sh """
                             docker build \
-                                -t ${DOCKERHUB_USER}/devops-intel-frontend:${TAG} \
+                                -t ${DOCKERHUB_USER}/devops-intel-frontend:${env.TAG} \
                                 frontend
                         """
                     } else {
@@ -86,56 +90,67 @@ pipeline {
             steps {
                 sh """
                     echo ${DOCKERHUB_PSW} | docker login \
-                        -u ${DOCKERHUB_USR} \
-                        --password-stdin
+                        -u ${DOCKERHUB_USR} --password-stdin
                 """
             }
         }
 
-        /* ---------------------- PUSH IMAGES ---------------------- */
+        /* ---------------------- PUSH IMAGES TO DOCKER HUB ---------------------- */
         stage('Push Images') {
             steps {
                 script {
 
-                    if (sh(script: "docker image inspect ${DOCKERHUB_USER}/devops-intel-backend:${TAG}", returnStatus: true) == 0) {
-                        sh "docker push ${DOCKERHUB_USER}/devops-intel-backend:${TAG}"
+                    if (sh(script: "docker image inspect ${DOCKERHUB_USER}/devops-intel-backend:${env.TAG}", returnStatus: true) == 0) {
+                        sh "docker push ${DOCKERHUB_USER}/devops-intel-backend:${env.TAG}"
                     }
 
-                    if (sh(script: "docker image inspect ${DOCKERHUB_USER}/devops-intel-frontend:${TAG}", returnStatus: true) == 0) {
-                        sh "docker push ${DOCKERHUB_USER}/devops-intel-frontend:${TAG}"
+                    if (sh(script: "docker image inspect ${DOCKERHUB_USER}/devops-intel-frontend:${env.TAG}", returnStatus: true) == 0) {
+                        sh "docker push ${DOCKERHUB_USER}/devops-intel-frontend:${env.TAG}"
                     }
                 }
             }
         }
 
-           /* ---------------------- DEPLOY TO EC2 (LIVE) ---------------------- */
+        /* ---------------------- DEPLOY TO EC2 ---------------------- */
         stage('Deploy to EC2') {
-            when { expression { return true } }   // enable deployment
+            when { expression { true } }  // always deploy
             steps {
-                sshagent (credentials: ['ec2-ssh']) {
+                sshagent(credentials: ['ec2-ssh']) {
                     sh """
-                        ssh -o StrictHostKeyChecking=no ubuntu@13.233.102.98 '
-                            docker pull sunilak05/devops-intel-backend:${TAG} || true &&
-                            docker pull sunilak05/devops-intel-frontend:${TAG} || true &&
+                        ssh -o StrictHostKeyChecking=no ubuntu@13.233.102.98 "
+                            echo 'Pulling latest images...' &&
 
-                            # stop old containers
+                            docker pull ${DOCKERHUB_USER}/devops-intel-backend:${env.TAG} || true &&
+                            docker pull ${DOCKERHUB_USER}/devops-intel-frontend:${env.TAG} || true &&
+
+                            echo 'Stopping old containers...' &&
                             docker stop devops-backend || true &&
                             docker stop devops-frontend || true &&
 
-                            # remove old containers
+                            echo 'Removing old containers...' &&
                             docker rm devops-backend || true &&
                             docker rm devops-frontend || true &&
 
-                            # start backend
-                            docker run -d --name devops-backend -p 8081:8081 \
-                                sunilak05/devops-intel-backend:${TAG} &&
+                            echo 'Starting backend...' &&
+                            docker run -d --name devops-backend -p 8081:8081 \\
+                                ${DOCKERHUB_USER}/devops-intel-backend:${env.TAG} &&
 
-                            # start frontend
-                            docker run -d --name devops-frontend -p 80:80 \
-                                sunilak05/devops-intel-frontend:${TAG}
-                        '
+                            echo 'Starting frontend...' &&
+                            docker run -d --name devops-frontend -p 80:80 \\
+                                ${DOCKERHUB_USER}/devops-intel-frontend:${env.TAG}
+                        "
                     """
                 }
             }
         }
+    }
 
+    post {
+        success {
+            echo "SUCCESS — images pushed & deployed. Version: ${env.TAG}"
+        }
+        failure {
+            echo "BUILD FAILED — check errors."
+        }
+    }
+}
