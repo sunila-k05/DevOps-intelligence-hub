@@ -110,7 +110,7 @@ pipeline {
 
         /* ---------------------- DEPLOY TO EC2 (LATER) ---------------------- */
         stage('Deploy to EC2 (optional)') {
-            when { expression { false } }
+          when { branch 'main' }
             steps {
                 echo "Deployment disabled. Enable later."
             }
