@@ -7,6 +7,13 @@ pipeline {
         GITHUB_CRED = credentials('github')              // your GitHub token
     }
 
+    environment {
+  DOCKER_BUILDKIT = "1"
+  BUILDKIT_STEP_LOG_MAX_SIZE = "104857600"
+  BUILDKIT_PROGRESS = "plain"
+}
+
+
     stages {
 
         /* ---------------------- CHECKOUT CODE ---------------------- */
