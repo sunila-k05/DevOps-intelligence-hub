@@ -108,21 +108,34 @@ pipeline {
             }
         }
 
-        /* ---------------------- DEPLOY TO EC2 (LATER) ---------------------- */
-        stage('Deploy to EC2 (optional)') {
-          //when { branch 'main' }
+           /* ---------------------- DEPLOY TO EC2 (LIVE) ---------------------- */
+        stage('Deploy to EC2') {
+            when { expression { return true } }   // enable deployment
             steps {
-                echo "Deployment disabled. Enable later."
+                sshagent (credentials: ['ec2-ssh']) {
+                    sh """
+                        ssh -o StrictHostKeyChecking=no ubuntu@13.233.102.98 '
+                            docker pull sunilak05/devops-intel-backend:${TAG} || true &&
+                            docker pull sunilak05/devops-intel-frontend:${TAG} || true &&
+
+                            # stop old containers
+                            docker stop devops-backend || true &&
+                            docker stop devops-frontend || true &&
+
+                            # remove old containers
+                            docker rm devops-backend || true &&
+                            docker rm devops-frontend || true &&
+
+                            # start backend
+                            docker run -d --name devops-backend -p 8081:8081 \
+                                sunilak05/devops-intel-backend:${TAG} &&
+
+                            # start frontend
+                            docker run -d --name devops-frontend -p 80:80 \
+                                sunilak05/devops-intel-frontend:${TAG}
+                        '
+                    """
+                }
             }
         }
-    }
 
-    post {
-        success {
-            echo "SUCCESS — images pushed with tag: ${TAG}"
-        }
-        failure {
-            echo "BUILD FAILED — check errors"
-        }
-    }
-}
