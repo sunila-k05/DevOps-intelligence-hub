@@ -41,6 +41,15 @@ pipeline {
             }
         }
 
+        stage('Preload base images') {
+  steps {
+    sh """
+      docker pull registry.hub.docker.com/library/golang:1.22 || true
+      docker pull registry.hub.docker.com/library/alpine:3.20 || true
+    """
+  }
+}
+        
         /* ---------------------- BUILD BACKEND ---------------------- */
         stage('Build Backend') {
             steps {
