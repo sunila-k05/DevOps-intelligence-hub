@@ -7,7 +7,7 @@ pipeline {
         DOCKERHUB = credentials('dockerhub-cred')
 
         // Docker buildkit settings
-        DOCKER_BUILDKIT = "0"
+        DOCKER_BUILDKIT = "1"
         BUILDKIT_STEP_LOG_MAX_SIZE = "104857600"
         BUILDKIT_PROGRESS = "plain"
 
