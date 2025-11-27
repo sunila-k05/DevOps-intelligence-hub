@@ -1,16 +1,15 @@
 # Build stage
-FROM gcr.io/distroless/static-debian12:latest
+FROM golang:1.22-alpine AS builder
 WORKDIR /app
-COPY go.mod ./
+COPY go.mod .
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o server ./main.go
+RUN CGO_ENABLED=0 go build -o backend
 
-# Runtime stage
-FROM gcr.io/distroless/static-debian12:latest
+# Run stage
+FROM alpine:3.20
 WORKDIR /app
-COPY --from=builder /app/server /app/server
-ENV PORT=8080
+COPY --from=builder /app/backend .
 EXPOSE 8080
-USER nonroot:nonroot
-ENTRYPOINT ["/app/server"]
+CMD ["./backend"]
+
