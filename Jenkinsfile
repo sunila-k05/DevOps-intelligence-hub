@@ -2,56 +2,98 @@ pipeline {
     agent any
 
     environment {
-        AWS_REGION = "us-east-1"
-        ACCOUNT_ID = "<AWS-ACCOUNT-ID>"
-        REPO_NAME = "<ECR-REPO-NAME>"
-        IMAGE_TAG = "${BUILD_NUMBER}"
-        ECR_URL = "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        DOCKERHUB_USER = "sunilak05"
     }
 
     stages {
 
-        stage('Checkout Code') {
+        stage('Checkout') {
             steps {
-                git branch: 'main', url: 'https://github.com/<your-username>/<your-repo>.git'
+                git branch: 'main', url: 'https://github.com/sunila-k05/DevOps-intelligence-hub.git'
+                script {
+                    TAG = sh(script: "git rev-parse --short HEAD", returnStdout: true).trim()
+                    echo "Using TAG: ${TAG}"
+                }
             }
         }
 
-        stage('Login to AWS ECR') {
+        stage('Build Backend') {
             steps {
-                sh """
-                aws --version
-                aws ecr get-login-password --region ${AWS_REGION} | \
-                docker login --username AWS --password-stdin ${ECR_URL}
-                """
+                script {
+                    if (fileExists('backend/Dockerfile')) {
+                        sh """
+                        docker build -t ${DOCKERHUB_USER}/devops-intel-backend:${TAG} backend
+                        """
+                    } else {
+                        echo "Backend Dockerfile not found"
+                    }
+                }
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Build Frontend') {
             steps {
-                sh "docker build -t ${REPO_NAME}:${IMAGE_TAG} ."
+                script {
+                    if (fileExists('frontend/Dockerfile')) {
+                        sh """
+                        docker build -t ${DOCKERHUB_USER}/devops-intel-frontend:${TAG} frontend
+                        """
+                    } else {
+                        echo "Frontend Dockerfile not found"
+                    }
+                }
             }
         }
 
-        stage('Tag & Push to ECR') {
+        stage('DockerHub Login') {
             steps {
-                sh """
-                docker tag ${REPO_NAME}:${IMAGE_TAG} ${ECR_URL}/${REPO_NAME}:${IMAGE_TAG}
-                docker push ${ECR_URL}/${REPO_NAME}:${IMAGE_TAG}
-                """
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-cred',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    sh """
+                    echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                    """
+                }
             }
         }
 
-        stage('Deploy to ECS') {
+        stage('Push Images') {
             steps {
-                sh """
-                aws ecs update-service \
-                --cluster <ECS-CLUSTER> \
-                --service <ECS-SERVICE> \
-                --force-new-deployment \
-                --region ${AWS_REGION}
-                """
+                sh "docker push ${DOCKERHUB_USER}/devops-intel-backend:${TAG}"
+                sh "docker push ${DOCKERHUB_USER}/devops-intel-frontend:${TAG}"
             }
+        }
+
+        stage('Deploy to EC2') {
+            steps {
+                sshagent(credentials: ['ec2-ssh']) {
+                    sh """
+                    ssh -o StrictHostKeyChecking=no ubuntu@13.233.102.98 '
+                        docker pull ${DOCKERHUB_USER}/devops-intel-backend:${TAG}
+                        docker pull ${DOCKERHUB_USER}/devops-intel-frontend:${TAG}
+
+                        docker stop devops-backend || true
+                        docker rm devops-backend || true
+                        docker stop devops-frontend || true
+                        docker rm devops-frontend || true
+
+                        docker run -d --name devops-backend -p 8081:8081 ${DOCKERHUB_USER}/devops-intel-backend:${TAG}
+                        docker run -d --name devops-frontend -p 80:80 ${DOCKERHUB_USER}/devops-intel-frontend:${TAG}
+                    '
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "SUCCESS: Deployment finished with TAG ${TAG}"
+        }
+        failure {
+            echo "BUILD FAILED — check logs"
         }
     }
 }
