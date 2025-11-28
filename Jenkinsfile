@@ -1,126 +1,117 @@
 pipeline {
-    agent any
+  agent any
 
-    environment {
-        GITHUB = credentials('github')
-        DOCKERHUB = credentials('dockerhub-cred')
+  environment {
+    DOCKERHUB_NAMESPACE = "sunilak05"
+    IMAGE_TAG = "${env.BUILD_NUMBER}-${GIT_COMMIT?.substring(0,7)}"
+    COMPOSE_FILE = "docker-compose.yml"
+  }
 
-        DOCKER_BUILDKIT = "1"
-        BUILDKIT_STEP_LOG_MAX_SIZE = "104857600"
-        BUILDKIT_PROGRESS = "plain"
+  options {
+    timestamps()
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
 
-        DOCKERHUB_USER = "sunilak05"
+  stages {
+    stage('Checkout') {
+      steps {
+        checkout scm
+        script { env.GIT_COMMIT = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim() }
+      }
     }
 
-    stages {
+    stage('Build images') {
+      steps {
+        script {
+          // Build backend if present
+          if (fileExists('backend/Dockerfile')) {
+            echo "Building backend image..."
+            sh "docker build -t ${DOCKERHUB_NAMESPACE}/devops-intel-backend:${IMAGE_TAG} backend"
+          } else {
+            echo "No backend/Dockerfile found, skipping backend build"
+          }
 
-        /* ---------------------- CHECKOUT ---------------------- */
-        stage('Checkout') {
-            steps {
-                checkout scm
-
-                script {
-                    env.TAG = sh(
-                        script: "git rev-parse --short HEAD",
-                        returnStdout: true
-                    ).trim()
-
-                    echo "Using TAG: ${env.TAG}"
-                }
+          // Build frontend if present
+          if (fileExists('frontend/Dockerfile') || fileExists('frontend')) {
+            // If frontend has a Dockerfile, use it; otherwise build static assets and use a simple nginx image
+            if (fileExists('frontend/Dockerfile')) {
+              sh "docker build -t ${DOCKERHUB_NAMESPACE}/devops-intel-frontend:${IMAGE_TAG} frontend"
+            } else if (fileExists('frontend/package.json')) {
+              echo "Building frontend via node build and packaging into nginx image..."
+              sh '''
+                cd frontend
+                docker run --rm -v "$PWD":/work -w /work node:18-bullseye sh -c "npm ci --silent && npm run build"
+                cd ..
+                # create a lightweight nginx image with build output
+                docker build -t ${DOCKERHUB_NAMESPACE}/devops-intel-frontend:${IMAGE_TAG} - <<EOF
+                FROM nginx:stable-alpine
+                COPY frontend/build/ /usr/share/nginx/html/
+                EOF
+              '''
+            } else {
+              echo "No frontend source detected; skipping frontend build"
             }
+          } else {
+            echo "No frontend folder, skipping frontend build"
+          }
         }
-
-        /* ---------------------- PRELOAD BASE IMAGES ---------------------- */
-        stage('Preload Base Images') {
-            steps {
-                sh """
-                    docker pull registry.hub.docker.com/library/golang:1.22 || true
-                    docker pull registry.hub.docker.com/library/alpine:3.20 || true
-                    docker pull node:20-alpine || true
-                    docker pull nginx:alpine || true
-                """
-            }
-        }
-
-        /* ---------------------- BUILD BACKEND ---------------------- */
-        stage('Build Backend') {
-            steps {
-                script {
-                    if (fileExists('backend/Dockerfile')) {
-                        sh """
-                            docker build -t ${DOCKERHUB_USER}/devops-intel-backend:${env.TAG} backend
-                        """
-                    } else {
-                        echo "Backend Dockerfile missing — skipping."
-                    }
-                }
-            }
-        }
-
-        /* ---------------------- BUILD FRONTEND ---------------------- */
-        stage('Build Frontend') {
-            steps {
-                script {
-                    if (fileExists('frontend/Dockerfile')) {
-                        sh """
-                            docker build -t ${DOCKERHUB_USER}/devops-intel-frontend:${env.TAG} frontend
-                        """
-                    } else {
-                        echo "Frontend Dockerfile missing — skipping."
-                    }
-                }
-            }
-        }
-
-        /* ---------------------- DOCKER LOGIN ---------------------- */
-        stage('Docker Login') {
-            steps {
-                sh """
-                    echo '${DOCKERHUB_PSW}' | docker login -u ${DOCKERHUB_USR} --password-stdin
-                """
-            }
-        }
-
-        /* ---------------------- PUSH IMAGES ---------------------- */
-        stage('Push Images') {
-            steps {
-                script {
-                    sh "docker push ${DOCKERHUB_USER}/devops-intel-backend:${env.TAG}"
-                    sh "docker push ${DOCKERHUB_USER}/devops-intel-frontend:${env.TAG}"
-                }
-            }
-        }
-
-        /* ---------------------- DEPLOY TO EC2 ---------------------- */
-        stage('Deploy to EC2') {
-            steps {
-                sshagent (credentials: ['ec2-ssh']) {
-                    sh """
-                        ssh -o StrictHostKeyChecking=no ubuntu@13.233.102.98 '
-                            docker pull ${DOCKERHUB_USER}/devops-intel-backend:${env.TAG}
-                            docker pull ${DOCKERHUB_USER}/devops-intel-frontend:${env.TAG}
-
-                            docker stop devops-backend || true
-                            docker rm devops-backend || true
-
-                            docker stop devops-frontend || true
-                            docker rm devops-frontend || true
-
-                            docker run -d --name devops-backend -p 8081:8081 ${DOCKERHUB_USER}/devops-intel-backend:${env.TAG}
-                            docker run -d --name devops-frontend -p 80:80 ${DOCKERHUB_USER}/devops-intel-frontend:${env.TAG}
-                        '
-                    """
-                }
-            }
-        }
+      }
     }
 
-    post {
-        success {
-            echo "SUCCESS — deployed version ${env.TAG}"
+    stage('Docker Hub Login') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'dockerhub', usernameVariable: 'DOCKERHUB_USER', passwordVariable: 'DOCKERHUB_PASS')]) {
+          sh 'echo "$DOCKERHUB_PASS" | docker login -u "$DOCKERHUB_USER" --password-stdin'
         }
-        failure {
-            echo "PIPELINE FAILED — check logs!"
-        }
+      }
     }
+
+    stage('Push images') {
+      steps {
+        script {
+          if (sh(returnStatus: true, script: "docker image inspect ${DOCKERHUB_NAMESPACE}/devops-intel-backend:${IMAGE_TAG} > /dev/null 2>&1") == 0) {
+            sh "docker push ${DOCKERHUB_NAMESPACE}/devops-intel-backend:${IMAGE_TAG}"
+          } else {
+            echo "Backend image not found locally, skipping push"
+          }
+
+          if (sh(returnStatus: true, script: "docker image inspect ${DOCKERHUB_NAMESPACE}/devops-intel-frontend:${IMAGE_TAG} > /dev/null 2>&1") == 0) {
+            sh "docker push ${DOCKERHUB_NAMESPACE}/devops-intel-frontend:${IMAGE_TAG}"
+          } else {
+            echo "Frontend image not found locally, skipping push"
+          }
+        }
+      }
+    }
+
+    stage('Optional: Deploy on host (pull & restart)') {
+      steps {
+        script {
+          // If you want to update a docker-compose that references remote images, uncomment the following block.
+          // This assumes your docker-compose.yml uses image: sunilak05/devops-intel-frontend:latest (or a template).
+          // Here we pull images with the new tag then restart compose.
+          sh '''
+            # If you want to auto-deploy on the same host after push, uncomment lines below and adjust compose file to use image tags.
+            # docker pull ${DOCKERHUB_NAMESPACE}/devops-intel-backend:${IMAGE_TAG} || true
+            # docker pull ${DOCKERHUB_NAMESPACE}/devops-intel-frontend:${IMAGE_TAG} || true
+            # docker compose -f ${COMPOSE_FILE} down || true
+            # docker compose -f ${COMPOSE_FILE} up -d
+            echo "Deploy step is optional and currently a no-op. Uncomment docker pull/compose lines to activate."
+          '''
+        }
+      }
+    }
+  }
+
+  post {
+    success {
+      echo "Build ${env.BUILD_NUMBER}: images pushed to Docker Hub (${DOCKERHUB_NAMESPACE})"
+    }
+    failure {
+      echo "Build failed — check console output"
+    }
+    always {
+  //    sh 'docker image prune -f || true'
+    }
+  }
 }
