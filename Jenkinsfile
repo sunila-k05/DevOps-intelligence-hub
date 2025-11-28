@@ -93,44 +93,27 @@ pipeline {
     }
 
     stage('Deploy to EC2') {
-      steps {
-        // replace 'ec2-ssh' with your Jenkins SSH credentials id (private key)
-        sshagent(['ec2-ssh']) {
-          // use heredoc (EOF) with single-quoted delimiter to avoid interpolation issues
-          sh """
-            ssh -o StrictHostKeyChecking=no ubuntu@${DEPLOY_HOST} << 'EOF'
-              set -e
+  steps {
+    sshagent(['ec2-ssh']) {
+      sh """
+ssh -o StrictHostKeyChecking=no ubuntu@${DEPLOY_HOST} 'bash -s' <<'DEPLOY_SCRIPT'
+set -e
 
-              docker pull ${DOCKERHUB_NAMESPACE}/devops-intel-backend:${IMAGE_TAG} || true
-              docker pull ${DOCKERHUB_NAMESPACE}/devops-intel-frontend:${IMAGE_TAG} || true
+docker pull ${DOCKERHUB_NAMESPACE}/devops-intel-backend:${IMAGE_TAG} || true
+docker pull ${DOCKERHUB_NAMESPACE}/devops-intel-frontend:${IMAGE_TAG} || true
 
-              docker stop devops-backend || true
-              docker rm devops-backend  || true
+docker stop devops-backend || true
+docker rm devops-backend  || true
 
-              docker stop devops-frontend || true
-              docker rm devops-frontend  || true
+docker stop devops-frontend || true
+docker rm devops-frontend  || true
 
-              docker run -d --name devops-backend -p 8081:8081 ${DOCKERHUB_NAMESPACE}/devops-intel-backend:${IMAGE_TAG}
-              docker run -d --name devops-frontend -p 80:80 ${DOCKERHUB_NAMESPACE}/devops-intel-frontend:${IMAGE_TAG}
+docker run -d --name devops-backend -p 8081:8081 ${DOCKERHUB_NAMESPACE}/devops-intel-backend:${IMAGE_TAG}
+docker run -d --name devops-frontend -p 80:80 ${DOCKERHUB_NAMESPACE}/devops-intel-frontend:${IMAGE_TAG}
 
-              echo "Deployment finished on \$(hostname) with tag ${IMAGE_TAG}"
-            EOF
-          """
-        }
-      }
-    }
-  } // end stages
-
-  post {
-    success {
-      echo "Build ${env.BUILD_NUMBER}: images pushed and deployment attempted to ${DEPLOY_HOST}"
-    }
-    failure {
-      echo "Build failed — check console output"
-    }
-    always {
-      // optional cleanup on controller (be careful if controller also runs other jobs)
-      sh 'docker image prune -af || true'
+echo "Deployment finished on \$(hostname) with tag ${IMAGE_TAG}"
+DEPLOY_SCRIPT
+"""
     }
   }
 }
