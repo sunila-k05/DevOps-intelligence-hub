@@ -66,34 +66,23 @@ pipeline {
             }
         }
 
-        stage('Deploy to EC2') {
-            steps {
-                sshagent(credentials: ['ec2-ssh']) {
-                    sh """
-                    ssh -o StrictHostKeyChecking=no ubuntu@3.7.45.192
-                        docker pull ${DOCKERHUB_USER}/devops-intel-backend:${TAG}
-                        docker pull ${DOCKERHUB_USER}/devops-intel-frontend:${TAG}
+      stage('Deploy to EC2') {
+    steps {
+        sshagent(['ubuntu']) {
+            sh """
+                ssh -o StrictHostKeyChecking=no ubuntu@3.7.45.192 << 'EOF'
+                    docker pull sunilak05/devops-intel-backend:${TAG}
+                    docker pull sunilak05/devops-intel-frontend:${TAG}
 
-                        docker stop devops-backend || true
-                        docker rm devops-backend || true
-                        docker stop devops-frontend || true
-                        docker rm devops-frontend || true
+                    docker stop devops-backend || true
+                    docker rm devops-backend || true
+                    docker stop devops-frontend || true
+                    docker rm devops-frontend || true
 
-                        docker run -d --name devops-backend -p 8081:8081 ${DOCKERHUB_USER}/devops-intel-backend:${TAG}
-                        docker run -d --name devops-frontend -p 80:80 ${DOCKERHUB_USER}/devops-intel-frontend:${TAG}
-                    '
-                    """
-                }
-            }
-        }
-    }
-
-    post {
-        success {
-            echo "SUCCESS: Deployment finished with TAG ${TAG}"
-        }
-        failure {
-            echo "BUILD FAILED — check logs"
+                    docker run -d --name devops-backend -p 8081:8081 sunilak05/devops-intel-backend:${TAG}
+                    docker run -d --name devops-frontend -p 80:80 sunilak05/devops-intel-frontend:${TAG}
+                EOF
+            """
         }
     }
 }
