@@ -3,11 +3,9 @@ pipeline {
 
   environment {
     DOCKERHUB_NAMESPACE = "sunilak05"
-    // safer IMAGE_TAG using build number + short commit
     GIT_COMMIT = ""
     IMAGE_TAG = "${env.BUILD_NUMBER}-${env.GIT_COMMIT}"
-    COMPOSE_FILE = "docker-compose.yml"
-    DEPLOY_HOST = "3.7.45.192"          // update when IP changes or use DNS
+    DEPLOY_HOST = "3.7.45.192"      // update when IP changes
   }
 
   options {
@@ -16,11 +14,11 @@ pipeline {
   }
 
   stages {
+
     stage('Checkout') {
       steps {
         checkout scm
         script {
-          // set env.GIT_COMMIT to short sha
           env.GIT_COMMIT = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
           env.IMAGE_TAG = "${env.BUILD_NUMBER}-${env.GIT_COMMIT}"
           echo "Using IMAGE_TAG: ${env.IMAGE_TAG}"
@@ -32,10 +30,9 @@ pipeline {
       steps {
         script {
           if (fileExists('backend/Dockerfile')) {
-            echo "Building backend image..."
             sh "docker build -t ${DOCKERHUB_NAMESPACE}/devops-intel-backend:${IMAGE_TAG} backend"
           } else {
-            echo "No backend/Dockerfile found, skipping backend build"
+            echo "No backend Dockerfile"
           }
         }
       }
@@ -45,21 +42,19 @@ pipeline {
       steps {
         script {
           if (fileExists('frontend/Dockerfile')) {
-            echo "Building frontend (Dockerfile)..."
             sh "docker build -t ${DOCKERHUB_NAMESPACE}/devops-intel-frontend:${IMAGE_TAG} frontend"
           } else if (fileExists('frontend/package.json')) {
-            echo "Building frontend (npm build -> nginx image)..."
             sh """
               cd frontend
               docker run --rm -v "\$PWD":/work -w /work node:18-bullseye sh -c "npm ci --silent && npm run build"
               cd ..
               docker build -t ${DOCKERHUB_NAMESPACE}/devops-intel-frontend:${IMAGE_TAG} - <<'DOCKERFILE'
-              FROM nginx:stable-alpine
-              COPY frontend/dist/ /usr/share/nginx/html/
-              DOCKERFILE
+FROM nginx:stable-alpine
+COPY frontend/dist/ /usr/share/nginx/html/
+DOCKERFILE
             """
           } else {
-            echo "No frontend source detected; skipping frontend build"
+            echo "No frontend detected"
           }
         }
       }
@@ -67,7 +62,6 @@ pipeline {
 
     stage('DockerHub Login') {
       steps {
-        // replace 'dockerhub' with your Jenkins credential id for Docker Hub
         withCredentials([usernamePassword(credentialsId: 'dockerhub', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
           sh 'echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin'
         }
@@ -77,25 +71,22 @@ pipeline {
     stage('Push Images') {
       steps {
         script {
-          if (sh(returnStatus: true, script: "docker image inspect ${DOCKERHUB_NAMESPACE}/devops-intel-backend:${IMAGE_TAG} > /dev/null 2>&1") == 0) {
+
+          if (sh(returnStatus: true, script: "docker image inspect ${DOCKERHUB_NAMESPACE}/devops-intel-backend:${IMAGE_TAG}") == 0) {
             sh "docker push ${DOCKERHUB_NAMESPACE}/devops-intel-backend:${IMAGE_TAG}"
-          } else {
-            echo "Backend image not found locally, skipping push"
           }
 
-          if (sh(returnStatus: true, script: "docker image inspect ${DOCKERHUB_NAMESPACE}/devops-intel-frontend:${IMAGE_TAG} > /dev/null 2>&1") == 0) {
+          if (sh(returnStatus: true, script: "docker image inspect ${DOCKERHUB_NAMESPACE}/devops-intel-frontend:${IMAGE_TAG}") == 0) {
             sh "docker push ${DOCKERHUB_NAMESPACE}/devops-intel-frontend:${IMAGE_TAG}"
-          } else {
-            echo "Frontend image not found locally, skipping push"
           }
         }
       }
     }
 
     stage('Deploy to EC2') {
-  steps {
-    sshagent(['ec2-ssh']) {
-      sh """
+      steps {
+        sshagent(['ec2-ssh']) {
+          sh """
 ssh -o StrictHostKeyChecking=no ubuntu@${DEPLOY_HOST} 'bash -s' <<'DEPLOY_SCRIPT'
 set -e
 
@@ -113,7 +104,20 @@ docker run -d --name devops-frontend -p 80:80 ${DOCKERHUB_NAMESPACE}/devops-inte
 
 echo "Deployment finished on \$(hostname) with tag ${IMAGE_TAG}"
 DEPLOY_SCRIPT
-"""
+          """
+        }
+      }
+    }
+
+  } // <-- closes stages
+
+  post {
+    success {
+      echo "Build & Deploy SUCCESS"
+    }
+    failure {
+      echo "BUILD FAILED — check logs"
     }
   }
-}
+
+} // <-- closes pipeline
