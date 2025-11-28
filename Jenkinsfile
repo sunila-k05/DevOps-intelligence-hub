@@ -70,7 +70,7 @@ pipeline {
             steps {
                 sshagent(credentials: ['ec2-ssh']) {
                     sh """
-                    ssh -o StrictHostKeyChecking=no ubuntu@3.7.45.192'
+                    ssh -o StrictHostKeyChecking=no ubuntu@3.7.45.192
                         docker pull ${DOCKERHUB_USER}/devops-intel-backend:${TAG}
                         docker pull ${DOCKERHUB_USER}/devops-intel-frontend:${TAG}
 
