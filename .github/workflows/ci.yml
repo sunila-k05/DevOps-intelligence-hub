@@ -1,4 +1,4 @@
-name: DevOps-intelligence-hub
+name: DevOps-intelligence-hub CI/CD
 
 on:
   push:
@@ -8,64 +8,62 @@ on:
   workflow_dispatch:
 
 jobs:
-
   build:
     runs-on: ubuntu-latest
 
     steps:
-    # 1. Checkout code
-    - name: Checkout Repo
-      uses: actions/checkout@v4
+      # 1. Checkout code
+      - name: Checkout Repo
+        uses: actions/checkout@v4
 
-    # 2. Setup Node (frontend)
-    - name: Setup Node
-      uses: actions/setup-node@v4
-      with:
-        node-version: 20
+      # 2. Setup Node (frontend)
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
-    # 3. Install and build frontend
-    - name: Install Frontend
-      working-directory: ./frontend
-      run: |
-        npm install
-        npm run build
+      # 3. Install and build frontend
+      - name: Install & Build Frontend
+        working-directory: ./frontend
+        run: |
+          npm install
+          npm run build
 
-    # 4. Setup Go
-    - name: Setup Go
-      uses: actions/setup-go@v4
-      with:
-        go-version: "1.21"
+      # 4. Setup Go (backend)
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.21"
 
-    # 5. Build Backend
-    - name: Build Backend
-      working-directory: ./backend
-      run: |
-        go build -o app .
+      # 5. Build Backend
+      - name: Build Backend
+        working-directory: ./backend
+        run: |
+          go build -o app .
 
-    # 6. Setup Docker Buildx
-    - name: Setup Docker Buildx
-      uses: docker/setup-buildx-action@v3
+      # 6. Setup Docker Buildx
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-    # 7. Login to Docker Registry
-    - name: Login to DockerHub
-      uses: docker/login-action@v3
-      with:
-        registry: docker.io
-        username: ${{ secrets.DOCKERHUB_sunila-k05 }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
+      # 7. Login to DockerHub
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    # 8. Build & Push Images
-    - name: Build and Push Docker Images
-      run: |
-        docker build -t docker.io/${{ secrets.DOCKERHUB_sunila-k05 }}/devops-backend:latest ./backend
-        docker build -t docker.io/${{ secrets.DOCKERHUB_sunila-k05 }}/devops-frontend:latest ./frontend
-        docker push docker.io/${{ secrets.DOCKERHUB_sunila-k05 }}/devops-backend:latest
-        docker push docker.io/${{ secrets.DOCKERHUB_sunila-k05 }}/devops-frontend:latest
+      # 8. Build & Push Docker Images
+      - name: Build and Push Docker Images
+        run: |
+          docker build -t docker.io/${{ secrets.DOCKERHUB_USERNAME }}/devops-backend:latest ./backend
+          docker build -t docker.io/${{ secrets.DOCKERHUB_USERNAME }}/devops-frontend:latest ./frontend
+          docker push docker.io/${{ secrets.DOCKERHUB_USERNAME }}/devops-backend:latest
+          docker push docker.io/${{ secrets.DOCKERHUB_USERNAME }}/devops-frontend:latest
 
   deploy:
     needs: build
     runs-on: ubuntu-latest
 
     steps:
-    - name: Deploy (example Terraform/SSH/Cloud)
-      run: echo "Add deploy commands here"
+      - name: Deploy placeholder
+        run: echo "Deployment will be added here"
