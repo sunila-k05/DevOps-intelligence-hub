@@ -51,16 +51,16 @@ jobs:
       uses: docker/login-action@v3
       with:
         registry: docker.io
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        username: ${{ secrets.DOCKERHUB_sunila-k05 }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
     # 8. Build & Push Images
     - name: Build and Push Docker Images
       run: |
-        docker build -t docker.io/${{ secrets.DOCKERHUB_USERNAME }}/devops-backend:latest ./backend
-        docker build -t docker.io/${{ secrets.DOCKERHUB_USERNAME }}/devops-frontend:latest ./frontend
-        docker push docker.io/${{ secrets.DOCKERHUB_USERNAME }}/devops-backend:latest
-        docker push docker.io/${{ secrets.DOCKERHUB_USERNAME }}/devops-frontend:latest
+        docker build -t docker.io/${{ secrets.DOCKERHUB_sunila-k05 }}/devops-backend:latest ./backend
+        docker build -t docker.io/${{ secrets.DOCKERHUB_sunila-k05 }}/devops-frontend:latest ./frontend
+        docker push docker.io/${{ secrets.DOCKERHUB_sunila-k05 }}/devops-backend:latest
+        docker push docker.io/${{ secrets.DOCKERHUB_sunila-k05 }}/devops-frontend:latest
 
   deploy:
     needs: build
